@@ -5,36 +5,35 @@ import os
 import numpy as np
 from datetime import datetime
 import csv
+import tkinter as tk
+from tkinter import messagebox, ttk
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENCODINGS_PATH = os.path.join(BASE_DIR, "models", "face_encodings.pickle")
-# We will save the attendance sheet in the main project folder
 ATTENDANCE_FILE = os.path.join(BASE_DIR, "Attendance.csv")
+
+# Initialize at module level so all functions can access it
+marked_today = set()
 
 def mark_attendance(name):
     """Logs the person's name and time to a CSV file."""
-    # Check if we already marked them present in this exact session
-    # (To prevent writing "Anurag" 30 times a second)
     if name not in marked_today:
         now = datetime.now()
         time_string = now.strftime("%H:%M:%S")
         date_string = now.strftime("%Y-%m-%d")
         
-        # Write to the CSV file
         file_exists = os.path.isfile(ATTENDANCE_FILE)
         with open(ATTENDANCE_FILE, 'a', newline='') as f:
             writer = csv.writer(f)
-            # Add headers if the file is brand new
             if not file_exists:
                 writer.writerow(['Name', 'Time', 'Date', 'Status'])
-            
             writer.writerow([name, time_string, date_string, 'Present'])
             
         print(f"✅ {name} marked PRESENT at {time_string}")
         marked_today.add(name)
 
-def run_attendance_system():
+def run_attendance_system(camera_index):
     if not os.path.exists(ENCODINGS_PATH):
         print(f"❌ Error: {ENCODINGS_PATH} not found.")
         return
@@ -42,23 +41,21 @@ def run_attendance_system():
     print("⏳ Loading TRACE Face Database...")
     data = pickle.loads(open(ENCODINGS_PATH, "rb").read())
     
-    video_capture = cv2.VideoCapture(0)
+    # Initialize webcam with the user-selected camera index
+    video_capture = cv2.VideoCapture(camera_index)
     
     print("="*40)
-    print("🎥 TRACE ATTENDANCE SCANNER LIVE")
+    print(f"🎥 TRACE ATTENDANCE SCANNER LIVE (Camera {camera_index})")
     print("   Look at the camera to check-in.")
     print("   Press [Q] to quit.")
     print("="*40)
 
-    # Global set to track who is already marked in this run
-    global marked_today
-    marked_today = set()
-
     while True:
         ret, frame = video_capture.read()
-        if not ret: break
+        if not ret: 
+            print("❌ Error: Could not read from webcam!")
+            break
 
-        # Shrink frame for faster processing
         small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
         rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
@@ -75,12 +72,10 @@ def run_attendance_system():
             
             if matches[best_match_index]:
                 name = data["names"][best_match_index]
-                # Log attendance!
                 mark_attendance(name)
 
             face_names.append(name)
 
-        # Draw the graphics
         for (top, right, bottom, left), name in zip(face_locations, face_names):
             top *= 4
             right *= 4
@@ -88,19 +83,17 @@ def run_attendance_system():
             left *= 4
 
             if name == "Unknown":
-                color = (0, 0, 255) # Red
+                color = (0, 0, 255) 
                 status_text = "ACCESS DENIED"
             else:
-                color = (0, 255, 0) # Green
+                color = (0, 255, 0) 
                 status_text = "PRESENT"
 
             cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
             cv2.rectangle(frame, (left, bottom - 35), (right, bottom), color, cv2.FILLED)
             font = cv2.FONT_HERSHEY_DUPLEX
             
-            # Show Name
             cv2.putText(frame, name, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
-            # Show Status floating above the box
             cv2.putText(frame, status_text, (left, top - 10), font, 0.8, color, 1)
 
         cv2.imshow('TRACE Auto-Attendance', frame)
@@ -112,5 +105,45 @@ def run_attendance_system():
     cv2.destroyAllWindows()
     print("👋 Scanner Closed.")
 
+# --- UI & CAMERA DETECTION ---
+def get_available_cameras():
+    """Tests the first 5 indexes to see which cameras are available."""
+    available_cameras = []
+    for i in range(5):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW) # CAP_DSHOW is faster on Windows
+        if cap.isOpened():
+            available_cameras.append(f"Camera {i}")
+            cap.release()
+    return available_cameras
+
+def launch_ui():
+    """Builds the Tkinter interface to select a camera."""
+    root = tk.Tk()
+    root.title("TRACE - Camera Setup")
+    root.geometry("320x150")
+    
+    tk.Label(root, text="Select Camera For Attendance:", font=("Arial", 12)).pack(pady=10)
+    
+    cameras = get_available_cameras()
+    if not cameras:
+        messagebox.showerror("Error", "No cameras detected!")
+        root.destroy()
+        return
+
+    cam_var = tk.StringVar(value=cameras[0])
+    dropdown = ttk.Combobox(root, textvariable=cam_var, values=cameras, state="readonly")
+    dropdown.pack(pady=5)
+
+    def on_start():
+        selected_cam_str = cam_var.get()
+        # Extract the number from "Camera 0", "Camera 1", etc.
+        cam_index = int(selected_cam_str.split()[1])
+        root.destroy() # Close the UI menu
+        run_attendance_system(cam_index) # Launch the main camera feed
+
+    tk.Button(root, text="Start TRACE Scanner", command=on_start, bg="#0078D7", fg="white", font=("Arial", 10, "bold")).pack(pady=15)
+    
+    root.mainloop()
+
 if __name__ == "__main__":
-    run_attendance_system()
+    launch_ui()
