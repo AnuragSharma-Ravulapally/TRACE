@@ -5,6 +5,7 @@ import csv
 import tempfile
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file
+from sqlalchemy import or_
 from models import db, User
 from face_utils import base64_to_image, get_embedding, get_averaged_embedding, find_best_match
 from gait_utils import get_gait_embedding_from_video, find_best_gait_match
@@ -19,6 +20,12 @@ UPLOAD_DIR   = os.path.join(BASE_DIR, "uploads")
 
 os.makedirs(DATABASE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Longest allowed length (including leading dot) of an uploaded video's file
+# extension. Any uploaded filename whose extension doesn't fit this whitelist
+# is normalised to ``.mp4`` before being interpolated into our temp path —
+# this is the front line against path-injection via ``video.filename``.
+_MAX_EXT_LEN = 5
 
 app.config["SQLALCHEMY_DATABASE_URI"] = (
     "sqlite:///" + os.path.join(DATABASE_DIR, "trace.db")
@@ -210,43 +217,104 @@ def identify():
         return jsonify({"error": str(e)}), 500
 
 
-# ── API: Gait Register ─────────────────────────────────────────────────
+# ── API: Gait Register (Dual-Angle) ────────────────────────────────────
 @app.route("/api/register-gait", methods=["POST"])
 def register_gait():
     """
-    Accepts a video file upload.
-    Extracts GEI → embedding → stores in user record.
+    Dual-angle gait enrollment.
+
+    Accepts two video uploads simultaneously — one Left-to-Right walk and
+    one Right-to-Left walk — extracts a 512-d gait embedding for each, and
+    stores them in the user's ``gait_embedding_lr`` / ``gait_embedding_rl``
+    columns.
+
+    Form fields:
+        user_id  : int   — required
+        video_lr : file  — Left-to-Right walking clip   (at least one of
+        video_rl : file  — Right-to-Left walking clip    lr / rl required)
     """
-    user_id = request.form.get("user_id")
-    video   = request.files.get("video")
-
-    if not user_id:
+    raw_user_id = request.form.get("user_id")
+    if not raw_user_id:
         return jsonify({"error": "user_id is required"}), 400
-    if not video:
-        return jsonify({"error": "Video file is required"}), 400
+    try:
+        user_id = int(raw_user_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "user_id must be an integer"}), 400
 
-    user = User.query.get(int(user_id))
+    user = User.query.get(user_id)
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    # Save temp video
-    suffix = os.path.splitext(video.filename)[1] or ".mp4"
-    tmp_path = os.path.join(UPLOAD_DIR, f"gait_reg_{user_id}{suffix}")
-    video.save(tmp_path)
+    video_lr = request.files.get("video_lr")
+    video_rl = request.files.get("video_rl")
+
+    # Dual-angle enrollment: both LR and RL clips are required so every user
+    # has full coverage of the L→R / R→L covariate shift at match time.
+    if not video_lr or not video_rl:
+        return jsonify({
+            "error": "Both Left-to-Right (video_lr) and Right-to-Left "
+                     "(video_rl) video uploads are required."
+        }), 400
+
+    def _extract(video, tag):
+        """Save upload to a sandboxed temp path and run the gait pipeline.
+
+        The temp filename is built **entirely** from trusted values
+        (``UPLOAD_DIR``, the integer ``user_id``, the literal ``tag``, and a
+        fixed extension) — the user-controlled ``video.filename`` is never
+        interpolated, so there is no path-injection surface here. The gait
+        pipeline reads via OpenCV / FFmpeg which sniff format from content,
+        so a hardcoded ``.mp4`` suffix is fine for any uploaded container.
+        """
+        # ``tag`` is one of "lr" / "rl" (literals), ``user_id`` is an int.
+        tmp_path = os.path.join(UPLOAD_DIR, f"gait_reg_{user_id}_{tag}.mp4")
+        video.save(tmp_path)
+        try:
+            return get_gait_embedding_from_video(tmp_path)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    saved = []
+    failures = []
+
+    if video_lr:
+        try:
+            emb_lr = _extract(video_lr, "lr")
+            user.set_gait_embedding_lr(emb_lr)
+            saved.append("LR")
+        except Exception:
+            app.logger.exception("gait LR embedding extraction failed")
+            failures.append("LR")
+
+    if video_rl:
+        try:
+            emb_rl = _extract(video_rl, "rl")
+            user.set_gait_embedding_rl(emb_rl)
+            saved.append("RL")
+        except Exception:
+            app.logger.exception("gait RL embedding extraction failed")
+            failures.append("RL")
+
+    if not saved:
+        return jsonify({
+            "error": "No usable clips. Both Left-to-Right and Right-to-Left "
+                     "extractions failed — try clearer side-view recordings."
+        }), 400
 
     try:
-        embedding = get_gait_embedding_from_video(tmp_path)
-        user.set_gait_embedding(embedding)
         db.session.commit()
-        os.remove(tmp_path)
-        return jsonify({
-            "success": True,
-            "message": f"Gait registered for {user.full_name}!"
-        })
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("gait embedding commit failed for user %s", user_id)
+        return jsonify({"error": "Failed to save embedding"}), 500
+
+    msg = f"Gait registered for {user.full_name}! ({'+'.join(saved)} stored)"
+    if failures:
+        msg += f" {','.join(failures)} clip(s) skipped due to extraction errors."
+    return jsonify({"success": True, "message": msg, "stored": saved})
 
 # ── API: Gait Identify ─────────────────────────────────────────────────
 @app.route("/api/identify-gait", methods=["POST"])
@@ -262,8 +330,11 @@ def identify_gait():
     try:
         from gait_utils import vanity_score
         embedding = get_gait_embedding_from_video(tmp_path)
-        all_users = User.query.filter(User.gait_embedding.isnot(None)).all()
-        match, scaled, raw = find_best_gait_match(embedding, all_users)
+        all_users = User.query.filter(or_(
+            User.gait_embedding_lr.isnot(None),
+            User.gait_embedding_rl.isnot(None),
+        )).all()
+        match, scaled, raw, reason = find_best_gait_match(embedding, all_users)
         os.remove(tmp_path)
 
         display_pct = round(vanity_score(scaled) * 100, 2)
@@ -282,6 +353,7 @@ def identify_gait():
             return jsonify({
                 "identified": False,
                 "message":    "Gait not recognized",
+                "reason":     reason,
                 "confidence": round(scaled * 100, 2),
                 "raw_score":  round(raw * 100, 4)
             })
@@ -326,8 +398,11 @@ def identify_fusion():
         video.save(tmp_path)
         try:
             g_emb = get_gait_embedding_from_video(tmp_path)
-            all_gait_users = User.query.filter(User.gait_embedding.isnot(None)).all()
-            gait_match, gait_score, gait_raw = find_best_gait_match(g_emb, all_gait_users)
+            all_gait_users = User.query.filter(or_(
+                User.gait_embedding_lr.isnot(None),
+                User.gait_embedding_rl.isnot(None),
+            )).all()
+            gait_match, gait_score, gait_raw, _ = find_best_gait_match(g_emb, all_gait_users)
         except Exception:
             gait_score = 0.0
             gait_raw   = 0.0
@@ -339,6 +414,11 @@ def identify_fusion():
     final_score = adaptive_fusion(face_score, gait_score, face_detected)
     FUSION_THRESHOLD = 0.50
 
+    # ``face_match`` / ``gait_match`` are None whenever the corresponding
+    # arm's similarity fell below its calibrated threshold (open-set
+    # rejection). If BOTH arms reject, we have an unknown subject — refuse
+    # entry cleanly with an "Access Denied" payload regardless of the
+    # underlying numeric scores.
     candidate = None
     if face_match and gait_match:
         candidate = face_match if (face_score or 0) >= (gait_score or 0) else gait_match
@@ -354,7 +434,20 @@ def identify_fusion():
         method_parts.append("Gait")
     method = "+".join(method_parts) + " Fusion"
 
-    if candidate and final_score >= FUSION_THRESHOLD:
+    if candidate is None:
+        # Open-set rejection — neither modality cleared its threshold.
+        return jsonify({
+            "identified":  False,
+            "access":      "denied",
+            "name":        "Unknown User",
+            "message":     "Unknown User / Access Denied",
+            "face_score":  round((face_score or 0) * 100, 2),
+            "gait_score":  round((gait_score or 0) * 100, 2),
+            "final_score": round(final_score * 100, 2),
+            "method":      method,
+        })
+
+    if final_score >= FUSION_THRESHOLD:
         from gait_utils import vanity_score
         gait_display = round(vanity_score(gait_score or 0.0) * 100, 2) if gait_score else 0.0
         log_attendance(
@@ -371,15 +464,17 @@ def identify_fusion():
             "beta":         0.3 if (face_detected and (face_score or 0) >= 0.5) else 0.7,
             "method":       method
         })
-    else:
-        return jsonify({
-            "identified":  False,
-            "message":     "Identity could not be confirmed",
-            "face_score":  round((face_score or 0) * 100, 2),
-            "gait_score":  round((gait_score or 0) * 100, 2),
-            "final_score": round(final_score * 100, 2),
-            "method":      method
-        })
+
+    # One arm produced a candidate but the fused score still didn't clear
+    # the fusion threshold — treat as a soft reject (low confidence).
+    return jsonify({
+        "identified":  False,
+        "message":     "Identity could not be confirmed",
+        "face_score":  round((face_score or 0) * 100, 2),
+        "gait_score":  round((gait_score or 0) * 100, 2),
+        "final_score": round(final_score * 100, 2),
+        "method":      method
+    })
 
 # ── API: Users CRUD ────────────────────────────────────────────────────
 @app.route("/api/users", methods=["GET"])

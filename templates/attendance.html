@@ -8,7 +8,6 @@
 </head>
 <body class="bg-gray-950 text-white min-h-screen px-6 py-12">
 
-  <!-- Header -->
   <div class="max-w-5xl mx-auto">
     <a href="/" class="text-cyan-500 text-sm hover:underline">← Back to Home</a>
 
@@ -18,7 +17,6 @@
         <p class="text-gray-400 text-sm mt-1">All check-ins recorded by TRACE</p>
       </div>
 
-      <!-- Stats + Download -->
       <div class="flex items-center gap-4">
         <div class="bg-gray-800 border border-gray-700 rounded-xl px-5 py-3 text-center">
           <p class="text-2xl font-bold text-cyan-400">{{ records|length }}</p>
@@ -37,7 +35,6 @@
       </div>
     </div>
 
-    <!-- Empty State -->
     {% if records|length == 0 %}
     <div class="bg-gray-900 border border-gray-700 rounded-2xl p-16 text-center">
       <div class="text-6xl mb-4">📭</div>
@@ -52,11 +49,9 @@
       </a>
     </div>
 
-    <!-- Table -->
     {% else %}
     <div class="bg-gray-900 border border-gray-700 rounded-2xl overflow-hidden">
 
-      <!-- Search Bar -->
       <div class="p-4 border-b border-gray-700">
         <input id="searchInput" type="text" placeholder="🔍  Search by name or date..."
           oninput="filterTable()"
@@ -72,30 +67,28 @@
               <th class="px-6 py-4 text-left">Name</th>
               <th class="px-6 py-4 text-left">Date</th>
               <th class="px-6 py-4 text-left">Time</th>
-              <th class="px-6 py-4 text-left">Confidence</th>
+              <th class="px-6 py-4 text-left">Method</th>
+              <th class="px-6 py-4 text-left">Final Score</th>
               <th class="px-6 py-4 text-left">Status</th>
             </tr>
           </thead>
           <tbody id="tableBody">
             {% for record in records %}
             <tr class="border-t border-gray-800 hover:bg-gray-800/50 transition attendance-row">
-              <!-- Row number (newest = 1) -->
               <td class="px-6 py-4 text-gray-500">{{ loop.index }}</td>
 
-              <!-- Name -->
               <td class="px-6 py-4 font-semibold text-white">
                 {{ record['Name'] }}
               </td>
 
-              <!-- Date -->
               <td class="px-6 py-4 text-gray-300">{{ record['Date'] }}</td>
 
-              <!-- Time -->
               <td class="px-6 py-4 text-gray-300">{{ record['Time'] }}</td>
 
-              <!-- Confidence with color bar -->
+              <td class="px-6 py-4 font-medium text-cyan-400">{{ record['Method'] }}</td>
+
               <td class="px-6 py-4">
-                {% set conf = record['Confidence (%)'] | float %}
+                {% set conf = (record['Final Score'] | float) * 100 %}
                 <div class="flex items-center gap-2">
                   <div class="w-20 bg-gray-700 rounded-full h-1.5">
                     <div class="h-1.5 rounded-full
@@ -105,13 +98,11 @@
                       style="width: {{ [conf, 100] | min }}%">
                     </div>
                   </div>
-                  <span class="text-gray-300">{{ record['Confidence (%)'] }}%</span>
+                  <span class="text-gray-300">{{ "%.2f"|format(conf) }}%</span>
                 </div>
               </td>
 
-              <!-- Status badge -->
               <td class="px-6 py-4">
-                {% set conf = record['Confidence (%)'] | float %}
                 {% if conf >= 80 %}
                   <span class="bg-green-900/50 text-green-400 border border-green-700
                                text-xs px-3 py-1 rounded-full">High</span>
@@ -129,7 +120,6 @@
         </table>
       </div>
 
-      <!-- Footer -->
       <div class="px-6 py-3 border-t border-gray-700 text-right text-xs text-gray-600">
         Showing {{ records|length }} record{{ 's' if records|length != 1 else '' }} · 
         Newest first

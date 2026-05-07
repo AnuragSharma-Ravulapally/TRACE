@@ -1,0 +1,29 @@
+{
+  "arch": "resnet18",
+  "aspect_aware_align": true,
+  "embedding_dim": 512,
+  "extra": {},
+  "gei_size": [
+    64,
+    44
+  ],
+  "l2_normalize_embeddings": true,
+  "match_threshold": 0.5,
+  "min_silhouette_frames": 5,
+  "minmax_base_max": 1.0,
+  "minmax_base_min": 0.982,
+  "model_version": "v2-resnet18-arcface",
+  "normalize_mean": [
+    0.5
+  ],
+  "normalize_std": [
+    0.5
+  ],
+  "notes": "trained with --loss arcface",
+  "num_classes": 74,
+  "preproc_version": "v2-aspect64x44-cycle",
+  "score_scaling": "raw_cosine",
+  "unknown_margin_min": 0.05,
+  "unknown_raw_floor": 0.0,
+  "use_period_detection": true
+}
