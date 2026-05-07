@@ -12,7 +12,6 @@
     </p>
   </div>
 
-  <!-- Fusion explainer badge -->
   <div class="bg-gray-900 border border-cyan-900 rounded-xl px-5 py-3 mb-6 flex gap-3 items-start">
     <span class="text-2xl">⚡</span>
     <div>
@@ -24,7 +23,6 @@
     </div>
   </div>
 
-  <!-- Step guide -->
   <div class="flex items-center gap-2 mb-6 text-xs text-gray-500">
     <span class="flex items-center gap-1.5 bg-gray-900 border border-gray-800 rounded-full px-3 py-1">
       <span class="text-cyan-400 font-bold">Step 1</span> Stand still → Capture Face
@@ -41,7 +39,6 @@
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
 
-    <!-- Face panel (Feed 1) -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col">
       <h2 class="text-sm font-bold text-white uppercase tracking-wider mb-4">
         📸 Feed 1 — Face (Laptop Cam)
@@ -60,19 +57,16 @@
       </div>
       <canvas id="faceCanvas" class="hidden"></canvas>
 
-      <!-- Capture Face button -->
       <button id="captureFaceBtn" onclick="captureFace()"
         class="w-full bg-cyan-700 hover:bg-cyan-600 disabled:opacity-40 disabled:cursor-not-allowed
                text-white font-bold py-2.5 rounded-xl transition text-sm tracking-wide mb-2">
         📸 Capture Face
       </button>
 
-      <!-- Face capture status -->
       <div id="faceStatus" class="text-xs text-gray-600 text-center min-h-[1.25rem]">Idle</div>
       <div id="faceCaptureStatus" class="text-xs text-center font-semibold min-h-[1.25rem] mt-0.5"></div>
     </div>
 
-    <!-- Gait panel (Feed 2) -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 flex flex-col">
       <h2 class="text-sm font-bold text-white uppercase tracking-wider mb-4">
         🚶 Feed 2 — Gait (Iriun / Phone)
@@ -95,20 +89,30 @@
         </div>
       </div>
 
-      <!-- Record Gait button -->
       <button id="recordGaitBtn" onclick="captureGait()"
         class="w-full bg-violet-700 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed
                text-white font-bold py-2.5 rounded-xl transition text-sm tracking-wide mb-2">
         🎥 Record Gait (4s)
       </button>
+      
+      <div class="flex items-center gap-3 mb-2">
+        <hr class="flex-grow border-gray-800">
+        <span class="text-xs text-gray-600 uppercase font-semibold">OR</span>
+        <hr class="flex-grow border-gray-800">
+      </div>
 
-      <!-- Gait capture status -->
+      <input type="file" id="gaitUploadInput" accept="video/*" capture="environment" class="hidden" onchange="handleGaitUpload(event)" />
+      <button id="uploadGaitBtn" onclick="document.getElementById('gaitUploadInput').click()"
+        class="w-full bg-gray-800 hover:bg-gray-700 border border-gray-600 disabled:opacity-40 disabled:cursor-not-allowed
+               text-white font-bold py-2.5 rounded-xl transition text-sm tracking-wide mb-2">
+        📁 Upload / Mobile Camera
+      </button>
+
       <div id="gaitStatus" class="text-xs text-gray-600 text-center min-h-[1.25rem]">Idle</div>
       <div id="gaitCaptureStatus" class="text-xs text-center font-semibold min-h-[1.25rem] mt-0.5"></div>
     </div>
   </div>
 
-  <!-- Main fusion button — disabled until at least one biometric captured -->
   <button id="fusionBtn" onclick="runFusion()" disabled
     class="w-full bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500
            hover:to-violet-500 text-white font-extrabold py-4 rounded-2xl
@@ -116,14 +120,12 @@
     ⚡ Run Fusion Identity
   </button>
 
-  <!-- Capture readiness summary -->
   <div id="readinessSummary" class="flex justify-center gap-4 text-xs text-gray-600 mb-4">
     <span id="summaryFace">📸 Face: <span class="text-gray-600">Not captured</span></span>
-    <span class="text-gray-700">|</span>
+    <span class="text-gray-700\">|</span>
     <span id="summaryGait">🚶 Gait: <span class="text-gray-600">Not recorded</span></span>
   </div>
 
-  <!-- Progress -->
   <div id="progressWrap" class="hidden mb-4">
     <div class="w-full bg-gray-800 rounded-full h-2">
       <div id="progressBar" class="h-2 rounded-full bg-gradient-to-r from-cyan-500 to-violet-500
@@ -132,13 +134,11 @@
     <p id="progressLabel" class="text-xs text-gray-500 mt-1">Processing…</p>
   </div>
 
-  <!-- Result -->
   <div id="result" class="hidden bg-gray-900 border rounded-2xl p-8 text-center">
     <div id="resultIcon" class="text-6xl mb-4"></div>
     <p id="resultName" class="text-3xl font-extrabold mb-1"></p>
     <p id="resultMethod" class="text-xs text-gray-500 uppercase tracking-widest mb-6"></p>
 
-    <!-- Score breakdown -->
     <div id="scoreBreakdown" class="space-y-4 text-left">
       <div>
         <div class="flex justify-between text-xs text-gray-500 mb-1">
@@ -178,9 +178,9 @@
  * TRACE Fusion — decoupled dual-camera capture.
  *
  * Feed 1 = Face  : captured on demand via "📸 Capture Face" button.
- *                  Stored as base64 JPEG in `capturedFaceB64`.
- * Feed 2 = Gait  : recorded on demand via "🎥 Record Gait (4s)" button.
- *                  Stored as { blob, mime } in `capturedGaitPayload`.
+ * Stored as base64 JPEG in `capturedFaceB64`.
+ * Feed 2 = Gait  : recorded on demand via "🎥 Record Gait (4s)" button OR Upload.
+ * Stored as { blob, mime } in `capturedGaitPayload`.
  *
  * "⚡ Run Fusion Identity" becomes enabled once at least one biometric
  * is captured, then POSTs both to /api/identify-fusion as multipart.
@@ -189,8 +189,9 @@
 const GAIT_RECORD_MS = 4000;
 
 // ── Global biometric stores ──────────────────────────────────────────
-let capturedFaceB64    = null;   // base64 JPEG string or null
+let capturedFaceB64     = null;  // base64 JPEG string or null
 let capturedGaitPayload = null;  // { blob, mime } or null
+let currentGaitVideoUrl = null;  // Store local URL to play uploaded videos
 
 // ── DOM refs ─────────────────────────────────────────────────────────
 const faceSelect       = document.getElementById('faceCamSelect');
@@ -297,6 +298,13 @@ async function bindCamera(which, deviceId) {
       faceVideo.srcObject = stream;
       document.getElementById('faceStatus').textContent = '🟢 Face feed live';
     } else {
+      // If switching back to a live camera from an uploaded video, clean up the video player
+      if (currentGaitVideoUrl) {
+          URL.revokeObjectURL(currentGaitVideoUrl);
+          currentGaitVideoUrl = null;
+          gaitVideo.src = "";
+      }
+
       stopStream(gaitStream);
       gaitStream = stream;
       gaitVideo.srcObject = stream;
@@ -329,7 +337,7 @@ function snapshotFace() {
   return canvas.toDataURL('image/jpeg', 0.9);
 }
 
-// ── Record helper ────────────────────────────────────────────────────
+// ── Record & Upload helper ───────────────────────────────────────────
 
 function recordGait(durationMs) {
   return new Promise((resolve, reject) => {
@@ -361,6 +369,42 @@ function recordGait(durationMs) {
       document.getElementById('recordIndicator').classList.add('hidden');
     }, durationMs);
   });
+}
+
+function handleGaitUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  capturedGaitPayload = { blob: file, mime: file.type || 'video/mp4' };
+  
+  // Stop the live feed to indicate upload took priority
+  stopStream(gaitStream);
+  gaitStream = null;
+  gaitVideo.srcObject = null;
+
+  // NEW SAUCE: Play the uploaded video in the UI
+  if (currentGaitVideoUrl) {
+      URL.revokeObjectURL(currentGaitVideoUrl); // Clean up old memory
+  }
+  currentGaitVideoUrl = URL.createObjectURL(file);
+  gaitVideo.src = currentGaitVideoUrl;
+  gaitVideo.loop = true;
+  gaitVideo.muted = true;
+  gaitVideo.play();
+
+  document.getElementById('gaitStatus').innerHTML = '📁 <span class="text-violet-400 font-semibold">Playing uploaded video</span>';
+  
+  // Truncate filename if it's too long
+  let displayName = file.name;
+  if (displayName.length > 25) {
+      displayName = displayName.substring(0, 22) + '...';
+  }
+  
+  gaitCaptureStatus.textContent = '✅ File Selected: ' + displayName;
+  gaitCaptureStatus.className = 'text-xs text-center font-semibold min-h-[1.25rem] mt-0.5 text-violet-400';
+  
+  refreshFusionBtn();
+  refreshSummary();
 }
 
 // ── Capture actions (decoupled) ──────────────────────────────────────
@@ -517,6 +561,7 @@ async function runFusion() {
 window.addEventListener('beforeunload', () => {
   stopStream(faceStream);
   stopStream(gaitStream);
+  if (currentGaitVideoUrl) URL.revokeObjectURL(currentGaitVideoUrl);
 });
 </script>
 {% endblock %}

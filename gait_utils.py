@@ -319,13 +319,18 @@ def get_gait_embedding_from_video(video_path: str) -> list:
 
 def scale_gait_score(raw_score: float) -> float:
     """
-    Min-Max Normalization "Confidence Punisher" — legacy v1 only.
-
-    On v2 (raw-cosine) models this is the identity (clamped to [0, 1]) so the
-    function remains safe to call from any callsite.
+    Min-Max Normalization "Confidence Punisher".
+    Now dynamically handles V2 with a strict 0.90 baseline.
     """
     if _USE_RAW_COSINE:
-        return float(min(max(raw_score, 0.0), 1.0))
+        # V2 Strict Accuracy Punisher
+        v2_min, v2_max = 0.90, 1.00
+        if raw_score < v2_min:
+            return 0.0
+        scaled = (raw_score - v2_min) / (v2_max - v2_min)
+        return float(min(max(scaled, 0.0), 1.0))
+
+    # Legacy v1 logic
     if raw_score < BASE_MIN:
         return 0.0
     scaled = (raw_score - BASE_MIN) / (BASE_MAX - BASE_MIN)
@@ -449,12 +454,17 @@ def find_best_gait_match(new_embedding: list, all_users) -> tuple:
     # i.e. every clip's similarity bumps up its owner's running maximum.
     # Tracking by integer index (not id()) keeps this stable even if the
     # ORM rebuilds user objects mid-call.
+    # Reduce: per-user → max similarity across that user's clips.
     raw_scores = np.full(len(candidate_users), -np.inf, dtype=np.float32)
     np.maximum.at(raw_scores, clip_to_user_idx, raw_clip_scores)
 
     if _USE_RAW_COSINE:
-        # Cosine ∈ [-1, 1]; clamp negative values to 0 for the scaled view.
-        scaled_scores = np.clip(raw_scores, 0.0, 1.0)
+        # V2 Strict Accuracy Punisher (Baseline 0.90)
+        V2_BASE_MIN = 0.90
+        V2_BASE_MAX = 1.00
+        denom = (V2_BASE_MAX - V2_BASE_MIN)
+        scaled_scores = np.clip((raw_scores - V2_BASE_MIN) / denom, 0.0, 1.0)
+        scaled_scores = np.where(raw_scores < V2_BASE_MIN, 0.0, scaled_scores)
     else:
         denom = (BASE_MAX - BASE_MIN)
         scaled_scores = np.clip((raw_scores - BASE_MIN) / denom, 0.0, 1.0)
