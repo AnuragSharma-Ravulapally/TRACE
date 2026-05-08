@@ -223,3 +223,7 @@ attendance.csv
 
 # AI Code Bridge
 .agent/
+
+# Self prep
+CODE_EXECUTION_TRACES.MD
+VIVA_QUICK_REFERENCE.md
