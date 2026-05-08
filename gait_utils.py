@@ -347,7 +347,7 @@ def vanity_score(scaled: float) -> float:
     if scaled < GAIT_THRESHOLD:
         return scaled          # failed — don't dress up the score
 
-    DISPLAY_LOW  = 0.85
+    DISPLAY_LOW  = 0.60
     DISPLAY_HIGH = 0.99
     t = (scaled - GAIT_THRESHOLD) / (1.0 - GAIT_THRESHOLD)
     return DISPLAY_LOW + t * (DISPLAY_HIGH - DISPLAY_LOW)
